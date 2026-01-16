@@ -32,7 +32,7 @@ app.use(express.json());
 app.use(cookieParser());
 app.use(
   cors({
-    origin: ["http://localhost:3000", "http://localhost:3001"],
+    origin: "*", // Allow all origins for production (or specifiy your frontend domain)
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"]
@@ -729,4 +729,7 @@ app.get("/admin/user-history/:userId", async (req, res) => {
   }
 });
 
-app.listen(2000);
+const PORT = process.env.PORT || 2000;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
