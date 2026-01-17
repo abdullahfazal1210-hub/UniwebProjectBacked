@@ -226,7 +226,7 @@ app.post("/requestProperty", async (req, res) => {
     if (token) {
       try {
         const decoded = jwt.verify(token, Secret_key);
-        userId = decoded.id;
+        userId = decoded.id; // Extract ID from token
         userEmail = decoded.email;
       } catch (err) {
         console.warn("Invalid token during property request:", err.message);
@@ -236,7 +236,7 @@ app.post("/requestProperty", async (req, res) => {
     // Schema has: firstName, lastName, email, phone, purchaseType, rentDuration, message, propertyId, propertyTitle, userId, status
     await propertyRequestModel.create({
       ...req.body,
-      userId: userId, // Attach userId if authenticated
+      userId: userId ? userId.toString() : null, // Ensure string or null
       email: userEmail || req.body.email // Prefer token email, fallback to form email
     });
     res.status(200).json({ msg: "Request sent" });
@@ -306,8 +306,21 @@ app.get("/admin/user-history/:id", async (req, res) => {
 // Get My History (User)
 app.get("/user/history", verifyToken, async (req, res) => {
   try {
-    const userId = req.user.id;
-    const history = await propertyRequestModel.find({ userId: userId }).sort({ date: -1 });
+    const { id, email } = req.user;
+
+    // Strict check to ensure we don't query with undefined
+    if (!id) {
+      return res.status(400).json({ msg: "User ID missing" });
+    }
+
+    // Match by UserID OR Email (for robustness with older data or manual email entry)
+    const history = await propertyRequestModel.find({
+      $or: [
+        { userId: id },
+        { email: email }
+      ]
+    }).sort({ date: -1 });
+
     res.status(200).json({ data: history });
   } catch (error) {
     console.error("Error fetching my history:", error);
