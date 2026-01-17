@@ -127,6 +127,7 @@ app.get("/property/detail", async (req, res) => {
   }
 });
 
+// Add Property
 app.post("/addProperty", upload.array("images", 5), async (req, res) => {
   try {
     const { Name, Desc, Bathroom, Rooms, type, Area, buy_price, rent_price_3_months, rent_price_6_months, rent_price_annual, Location } = req.body;
@@ -144,6 +145,32 @@ app.post("/addProperty", upload.array("images", 5), async (req, res) => {
     res.status(200).json({ msg: "Property added successfully", property });
   } catch (error) {
     res.status(500).json({ msg: "Failed to add property" });
+  }
+});
+
+// Get Property Status (For Detailed Page)
+app.get("/property/status/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const property = await propertyModel.findById(id);
+
+    if (!property) return res.status(404).json({ msg: "Property not found" });
+
+    // Count pending requests
+    const pendingCount = await propertyRequestModel.countDocuments({
+      propertyId: id,
+      status: "Pending"
+    });
+
+    res.status(200).json({
+      status: property.availabilityStatus || "Available",
+      count: pendingCount,
+      duration: property.rentDuration || 0,
+      availableDate: property.availableDate
+    });
+  } catch (error) {
+    console.error("Error fetching property status:", error);
+    res.status(500).json({ msg: "Failed to fetch status" });
   }
 });
 
@@ -269,7 +296,7 @@ app.get("/getmessage", async (req, res) => {
 });
 
 // Get Client Needs
-app.get("/client-needs", async (req, res) => {
+app.get("/client-need", async (req, res) => {
   try {
     const needs = await clientNeedModel.find().sort({ date: -1 });
     res.status(200).json(needs);
@@ -290,12 +317,38 @@ app.get("/propertyRequests", async (req, res) => {
   }
 });
 
-// Update Property Request Status
+// Update Property Request Status and Property Availability
 app.put("/propertyRequest/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
-    await propertyRequestModel.findByIdAndUpdate(id, { status });
+
+    // 1. Update the Request Status
+    const request = await propertyRequestModel.findByIdAndUpdate(id, { status }, { new: true });
+
+    // 2. If Accepted, Update the Property Status
+    if (status === "Accepted" && request) {
+      const propertyId = request.propertyId;
+
+      if (request.purchaseType === "buy") {
+        // Mark as Sold
+        await propertyModel.findByIdAndUpdate(propertyId, {
+          availabilityStatus: "Sold"
+        });
+      } else if (request.purchaseType === "rent") {
+        // Mark as Occupied and calculate return date
+        const durationMonths = parseInt(request.rentDuration) || 0;
+        const availableDate = new Date();
+        availableDate.setMonth(availableDate.getMonth() + durationMonths);
+
+        await propertyModel.findByIdAndUpdate(propertyId, {
+          availabilityStatus: "Occupied",
+          rentDuration: request.rentDuration,
+          availableDate: availableDate
+        });
+      }
+    }
+
     res.status(200).json({ msg: "Status updated" });
   } catch (error) {
     console.error("Error updating status:", error);
