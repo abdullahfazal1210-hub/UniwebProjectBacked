@@ -34,13 +34,14 @@ connectDB();
 const app = express();
 
 app.use(compression());
+app.set("trust proxy", 1); // Trust first proxy (Railway/Vercel)
 app.use(express.json());
 app.use(cookieParser());
 
 // Fixed CORS for Production
 app.use(
   cors({
-    origin: "https://uniwebproj.vercel.app", 
+    origin: "https://uniwebproj.vercel.app",
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"]
@@ -97,9 +98,11 @@ app.post("/login", async (req, res) => {
     // Cookie Security Fix for Railway/Vercel
     res.cookie("authToken", token, {
       httpOnly: true,
-      secure: true,   // Required for HTTPS (Railway/Vercel)
-      sameSite: "none", // Required for cross-site cookies
+      secure: true,   // Railway par HTTPS hota hai, isliye true hi rahega
+      sameSite: "none",
+      partitioned: true, // Naya Chrome rule for cross-site cookies
       path: "/",
+      maxAge: 24 * 60 * 60 * 1000 // 1 din ki validity
     });
 
     res.status(200).json({
