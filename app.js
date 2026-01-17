@@ -159,7 +159,46 @@ const verifyToken = (req, res, next) => {
   });
 };
 
-// ... include other routes here ...
+// --- Restored Missing Routes ---
+
+// Contact Form (Post Message)
+app.post("/message", async (req, res) => {
+  try {
+    // Schema has: email, firstName, lastName, phone, message, inquiryType, hearAbout, isRead, date
+    const { firstName, lastName, email, phone, message, inquiryType, hearAbout } = req.body;
+    await postMessgeModel.create({
+      firstName, lastName, email, phone, message, inquiryType, hearAbout
+    });
+    res.status(200).json({ msg: "Message sent successfully" });
+  } catch (error) {
+    console.error("Error sending message:", error);
+    res.status(500).json({ msg: "Failed to send message" });
+  }
+});
+
+// Client Need Form (Properties Page)
+app.post("/client-need", async (req, res) => {
+  try {
+    // Schema has: firstName, lastName, email, phone, preferredLocation, propertyType, noOfBathrooms, noOfBedrooms, budget, contactMethod, message
+    await clientNeedModel.create(req.body);
+    res.status(200).json({ msg: "Request received" });
+  } catch (error) {
+    console.error("Error submitting client need:", error);
+    res.status(500).json({ msg: "Failed to submit request" });
+  }
+});
+
+// Property Request Form (Detailed Page)
+app.post("/requestProperty", async (req, res) => {
+  try {
+    // Schema has: firstName, lastName, email, phone, purchaseType, rentDuration, message, propertyId, propertyTitle, userId, status
+    await propertyRequestModel.create(req.body);
+    res.status(200).json({ msg: "Request sent" });
+  } catch (error) {
+    console.error("Error requesting property:", error);
+    res.status(500).json({ msg: "Failed to request property" });
+  }
+});
 
 // Railway Port Fix
 const PORT = process.env.PORT || 2000;
