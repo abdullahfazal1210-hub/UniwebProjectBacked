@@ -356,6 +356,24 @@ app.put("/propertyRequest/:id", async (req, res) => {
   }
 });
 
+// Notification Counts for Sidebar
+app.get("/notifications/counts", async (req, res) => {
+  try {
+    const messages = await postMessgeModel.countDocuments({ isRead: false });
+    const clientNeeds = await clientNeedModel.countDocuments({ isRead: false });
+    const propertyRequests = await propertyRequestModel.countDocuments({ isRead: false });
+
+    res.status(200).json({
+      messages,
+      clientNeeds,
+      propertyRequests
+    });
+  } catch (error) {
+    console.error("Error fetching notification counts:", error);
+    res.status(500).json({ msg: "Failed to fetch counts" });
+  }
+});
+
 // Mark Notifications Read
 app.put("/notifications/mark-read/:type", async (req, res) => {
   try {
