@@ -263,7 +263,7 @@ app.get("/allusers", async (req, res) => {
   }
 });
 
-// Get User History
+// Get User History (Admin)
 app.get("/admin/user-history/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -280,6 +280,18 @@ app.get("/admin/user-history/:id", async (req, res) => {
     res.status(200).json({ data: history });
   } catch (error) {
     console.error("Error fetching user history:", error);
+    res.status(500).json({ msg: "Failed to fetch history" });
+  }
+});
+
+// Get My History (User)
+app.get("/user/history", verifyToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const history = await propertyRequestModel.find({ userId: userId }).sort({ date: -1 });
+    res.status(200).json({ data: history });
+  } catch (error) {
+    console.error("Error fetching my history:", error);
     res.status(500).json({ msg: "Failed to fetch history" });
   }
 });
