@@ -315,6 +315,32 @@ app.get("/user/history", verifyToken, async (req, res) => {
   }
 });
 
+// Get Single Request Details (For Invoice)
+app.get("/user/request/:id", verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+
+    // Find request and ensure it belongs to the user
+    const request = await propertyRequestModel.findOne({ _id: id, userId: userId });
+
+    if (!request) {
+      return res.status(404).json({ msg: "Request not found or unauthorized" });
+    }
+
+    // Fetch associated property details to get price info
+    const property = await propertyModel.findById(request.propertyId);
+
+    res.status(200).json({
+      request,
+      property
+    });
+  } catch (error) {
+    console.error("Error fetching request details:", error);
+    res.status(500).json({ msg: "Failed to fetch details" });
+  }
+});
+
 // Get Messages (Contact Form)
 app.get("/getmessage", async (req, res) => {
   try {
