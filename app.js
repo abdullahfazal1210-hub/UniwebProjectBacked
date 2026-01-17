@@ -299,7 +299,7 @@ app.get("/getmessage", async (req, res) => {
 app.get("/client-need", async (req, res) => {
   try {
     const needs = await clientNeedModel.find().sort({ date: -1 });
-    res.status(200).json(needs);
+    res.status(200).json({ data: needs });
   } catch (error) {
     console.error("Error fetching client needs:", error);
     res.status(500).json({ msg: "Failed to fetch client needs" });
