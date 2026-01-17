@@ -216,10 +216,29 @@ app.post("/client-need", async (req, res) => {
 });
 
 // Property Request Form (Detailed Page)
+// Property Request Form (Detailed Page)
 app.post("/requestProperty", async (req, res) => {
   try {
+    const token = req.cookies.authToken;
+    let userId = null;
+    let userEmail = null;
+
+    if (token) {
+      try {
+        const decoded = jwt.verify(token, Secret_key);
+        userId = decoded.id;
+        userEmail = decoded.email;
+      } catch (err) {
+        console.warn("Invalid token during property request:", err.message);
+      }
+    }
+
     // Schema has: firstName, lastName, email, phone, purchaseType, rentDuration, message, propertyId, propertyTitle, userId, status
-    await propertyRequestModel.create(req.body);
+    await propertyRequestModel.create({
+      ...req.body,
+      userId: userId, // Attach userId if authenticated
+      email: userEmail || req.body.email // Prefer token email, fallback to form email
+    });
     res.status(200).json({ msg: "Request sent" });
   } catch (error) {
     console.error("Error requesting property:", error);
