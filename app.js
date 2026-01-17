@@ -116,6 +116,18 @@ app.post("/login", async (req, res) => {
   }
 });
 
+// Logout Route (Clear Cookie)
+app.post("/logout", (req, res) => {
+  res.clearCookie("authToken", {
+    httpOnly: true,
+    secure: true,
+    sameSite: "none",
+    partitioned: true, // Match creation options
+    path: "/"
+  });
+  res.status(200).json({ msg: "Logged out successfully" });
+});
+
 // --- Property & Other Routes (Keep as they are) ---
 
 app.get("/property/detail", async (req, res) => {
