@@ -200,6 +200,169 @@ app.post("/requestProperty", async (req, res) => {
   }
 });
 
+// --- Admin Dashboard Routes ---
+
+// Dashboard Stats
+app.get("/dashboard-stats", async (req, res) => {
+  try {
+    const totalUsers = await userModel.countDocuments();
+    const totalSold = await propertyRequestModel.countDocuments({ status: "Accepted" }); // Assuming accepted means sold/rented
+    const totalMessages = await postMessgeModel.countDocuments();
+
+    // Simple trends (mock logic or aggregation if needed)
+    // For now returning basic counts
+    res.status(200).json({
+      totalUsers,
+      totalSold,
+      totalMessages,
+      salesTrend: [], // Implement aggregation if needed
+      rentalTrend: [],
+      userTrend: []
+    });
+  } catch (error) {
+    console.error("Error fetching stats:", error);
+    res.status(500).json({ msg: "Failed to fetch stats" });
+  }
+});
+
+// Get All Users
+app.get("/allusers", async (req, res) => {
+  try {
+    const users = await userModel.find().sort({ Date: -1 });
+    res.status(200).json({ data: users });
+  } catch (error) {
+    console.error("Error fetching users:", error);
+    res.status(500).json({ msg: "Failed to fetch users" });
+  }
+});
+
+// Get User History
+app.get("/admin/user-history/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    // Find requests by this user (assuming email or internal ID match. Schema has userId)
+    // First find the user to get their email if needed, or just search by userId match
+    const user = await userModel.findById(id);
+    if (!user) return res.status(404).json({ msg: "User not found" });
+
+    // Assuming we link by email or userId. Let's try matching both to be safe or just email if userId wasn't stored consistently
+    const history = await propertyRequestModel.find({
+      $or: [{ userId: id }, { email: user.email }]
+    }).sort({ date: -1 });
+
+    res.status(200).json({ data: history });
+  } catch (error) {
+    console.error("Error fetching user history:", error);
+    res.status(500).json({ msg: "Failed to fetch history" });
+  }
+});
+
+// Get Messages (Contact Form)
+app.get("/getmessage", async (req, res) => {
+  try {
+    const messages = await postMessgeModel.find().sort({ date: -1 });
+    res.status(200).json({ data: messages });
+  } catch (error) {
+    console.error("Error fetching messages:", error);
+    res.status(500).json({ msg: "Failed to fetch messages" });
+  }
+});
+
+// Get Client Needs
+app.get("/client-needs", async (req, res) => {
+  try {
+    const needs = await clientNeedModel.find().sort({ date: -1 });
+    res.status(200).json(needs);
+  } catch (error) {
+    console.error("Error fetching client needs:", error);
+    res.status(500).json({ msg: "Failed to fetch client needs" });
+  }
+});
+
+// Get Property Requests
+app.get("/propertyRequests", async (req, res) => {
+  try {
+    const requests = await propertyRequestModel.find().sort({ date: -1 });
+    res.status(200).json(requests);
+  } catch (error) {
+    console.error("Error fetching property requests:", error);
+    res.status(500).json({ msg: "Failed to fetch requests" });
+  }
+});
+
+// Update Property Request Status
+app.put("/propertyRequest/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    await propertyRequestModel.findByIdAndUpdate(id, { status });
+    res.status(200).json({ msg: "Status updated" });
+  } catch (error) {
+    console.error("Error updating status:", error);
+    res.status(500).json({ msg: "Failed to update status" });
+  }
+});
+
+// Mark Notifications Read
+app.put("/notifications/mark-read/:type", async (req, res) => {
+  try {
+    const { type } = req.params;
+    if (type === "message") {
+      await postMessgeModel.updateMany({ isRead: false }, { isRead: true });
+    } else if (type === "property-req") {
+      await propertyRequestModel.updateMany({ isRead: false }, { isRead: true });
+    } else if (type === "client-need") {
+      await clientNeedModel.updateMany({ isRead: false }, { isRead: true });
+    }
+    res.status(200).json({ msg: "Marked as read" });
+  } catch (error) {
+    console.error("Error marking read:", error);
+    res.status(500).json({ msg: "Failed to mark as read" });
+  }
+});
+
+// Update Property (Edit)
+app.post("/property/update", upload.array("images", 5), async (req, res) => {
+  try {
+    const { id, Name, Desc, Bathroom, Rooms, type, Area, buy_price, rent_price_3_months, rent_price_6_months, rent_price_annual, Location } = req.body;
+
+    const updateData = {
+      Name, Desc, Bathroom: Number(Bathroom), Rooms: Number(Rooms), type, Area: Number(Area),
+      buy_price: Number(buy_price), rent_price_3_months: Number(rent_price_3_months),
+      rent_price_6_months: Number(rent_price_6_months), rent_price_annual: Number(rent_price_annual),
+      Location
+    };
+
+    // If new images are uploaded, handle them (simple link logic or replace)
+    // For now we assume appending or replacing requires more logic, keeping simple update
+    // If you want to replace images:
+    if (req.files && req.files.length > 0) {
+      updateData.images = req.files.map((file) => ({
+        name: file.originalname,
+        data: file.buffer.toString("base64"),
+      }));
+    }
+
+    await propertyModel.findByIdAndUpdate(id, updateData);
+    res.status(200).json({ msg: "Property updated successfully" });
+  } catch (error) {
+    console.error("Error updating property:", error);
+    res.status(500).json({ msg: "Failed to update property" });
+  }
+});
+
+// Delete Property
+app.post("/property/delete", async (req, res) => {
+  try {
+    const { id } = req.body;
+    await propertyModel.findByIdAndDelete(id);
+    res.status(200).json({ msg: "Property deleted successfully" });
+  } catch (error) {
+    console.error("Error deleting property:", error);
+    res.status(500).json({ msg: "Failed to delete property" });
+  }
+});
+
 // Railway Port Fix
 const PORT = process.env.PORT || 2000;
 app.listen(PORT, () => {
