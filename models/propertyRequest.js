@@ -12,7 +12,7 @@ const propertyRequestSchema = new mongoose.Schema({
     propertyTitle: String,
     userId: String,
     status: {
-        type: String,
+        type: String, 
         default: "Pending",
     },
     isRead: {

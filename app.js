@@ -16,8 +16,12 @@ import dotenv from "dotenv";
 import { google } from "./oauth.js";
 import { generateState, generateCodeVerifier } from "arctic";
 import axios from "axios";
+import nodemailer from "nodemailer";
 
 dotenv.config();
+
+// Temporary in-memory OTP storage
+const otpStore = new Map();
 
 // Database Connection with more logging
 const connectDB = async () => {
@@ -41,7 +45,9 @@ app.use(cookieParser());
 // Fixed CORS for Production
 app.use(
   cors({
-    origin: "https://uniwebproj.vercel.app",
+    // 1. Changed https to http for localhost
+    // 2. Added your production URL so both work
+    origin: ["http://localhost:3000", "https://localhost:3000"],
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"]
@@ -51,15 +57,270 @@ app.use(
 const upload = multer({ storage: multer.memoryStorage() });
 const Secret_key = process.env.JWT_SECRET || "abdullah123@!";
 
+// Middleware to verify JWT
+const verifyToken = (req, res, next) => {
+  const token = req.cookies.authToken;
+  if (!token) return res.status(401).json({ message: "Not authenticated" });
+
+  jwt.verify(token, Secret_key, (err, decoded) => {
+    if (err) return res.status(403).json({ message: "Token is invalid" });
+    req.user = decoded;
+    next();
+  });
+};
+
+// --- Test Route ---
+app.get("/test", (req, res) => {
+  res.status(200).json({ message: "Backend is running and reachable!" });
+});
+
+// --- OTP Verification Logic ---
+
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: "abdullah.fazal1210@gmail.com",
+    pass: "rboxsyvyvwuifmcj", // App Password without spaces
+  },
+});
+
+// --- FORGOT PASSWORD ROUTES ---
+
+app.post("/forgot-password-send-otp", async (req, res) => {
+  console.log("📨 Received request for /forgot-password-send-otp for CNIC:", req.body.cnic);
+  try {
+    const { cnic } = req.body;
+    if (!cnic) return res.status(400).json({ message: "CNIC is required" });
+
+    // FLEXIBLE SEARCH: Try exact match first, then try without hyphens
+    let user = await userModel.findOne({ cnic });
+
+    if (!user) {
+      console.log("🔍 Exact match not found, trying normalized search...");
+      const cleanCnic = cnic.replace(/\D/g, "");
+      // We search where cnic cleaned of any non-digits matches our clean input
+      // This is a bit slow in Mongo but reliable for debugging
+      const allUsers = await userModel.find({});
+      user = allUsers.find(u => {
+        const storedClean = (u.cnic || "").replace(/\D/g, "");
+        return storedClean === cleanCnic;
+      });
+    }
+
+    if (!user) {
+      console.log(`❌ Forgot Password failed: CNIC ${cnic} not found in DB`);
+      return res.status(404).json({ message: "No account found with this CNIC." });
+    }
+
+    const email = user.email;
+    if (!email) {
+      console.log("❌ Error: Found user but they have NO email address in DB.");
+      return res.status(400).json({ message: "No email address associated with this CNIC. Please contact support." });
+    }
+
+    console.log(`🔍 User found! Email: ${email}`);
+    // Generate 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiry = Date.now() + 60000; // 1 minute expiry
+
+    console.log(`🔢 Generated Reset OTP: ${otp} for ${email}`);
+    otpStore.set(email, { otp, expiry });
+
+    const mailOptions = {
+      from: `"Talha Builders Support" <abdullah.fazal1210@gmail.com>`,
+      to: email,
+      subject: `[Talha Builders] Password Reset Code: ${otp}`,
+      text: `Your One-Time Password (OTP) for password reset is: ${otp}. This code will expire in 1 minute.`,
+      html: `
+        <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: auto; border: 1px solid #e0e0e0; border-radius: 12px; overflow: hidden; background-color: #ffffff;">
+          <div style="background-color: #d11a2a; padding: 30px; text-align: center;">
+            <h1 style="color: #ffffff; margin: 0; font-size: 24px; letter-spacing: 1px;">TALHA BUILDERS</h1>
+          </div>
+          <div style="padding: 40px; color: #333333;">
+            <h2 style="color: #1A1A1A; margin-top: 0;">Password Reset Verification</h2>
+            <p style="font-size: 16px; line-height: 1.6; color: #666666;">
+              We received a request to reset your password. Please use the verification code below to proceed.
+            </p>
+            <div style="text-align: center; margin: 40px 0;">
+              <div style="display: inline-block; background-color: #f4f4f4; padding: 20px 40px; border-radius: 12px; font-size: 36px; font-weight: bold; color: #d11a2a; letter-spacing: 10px; border: 2px dashed #d11a2a;">
+                ${otp}
+              </div>
+            </div>
+            <p style="font-size: 14px; color: #999999; text-align: center;">
+              This code is valid for <strong>1 minute</strong>.
+            </p>
+            <hr style="border: 0; border-top: 1px solid #eeeeee; margin: 30px 0;" />
+            <p style="font-size: 12px; color: #aaaaaa; line-height: 1.5;">
+              If you didn't request this, please secure your account.
+            </p>
+          </div>
+          <div style="background-color: #fafafa; padding: 20px; text-align: center; border-top: 1px solid #eeeeee;">
+            <p style="margin: 0; font-size: 12px; color: #999999;">&copy; 2026 Talha Builders. All rights reserved.</p>
+          </div>
+        </div>
+      `,
+    };
+
+    console.log("📤 Sending Reset OTP email...");
+    await transporter.sendMail(mailOptions);
+    console.log("✅ Reset OTP email sent successfully to:", email);
+
+    res.status(200).json({ message: "OTP sent to your registered email", email });
+  } catch (error) {
+    console.error("❌ ERROR sending reset OTP:", error);
+    res.status(500).json({ message: "Failed to send reset OTP", error: error.message });
+  }
+});
+
+app.post("/reset-password", async (req, res) => {
+  console.log("🔐 Received request for /reset-password for:", req.body.email);
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) return res.status(400).json({ message: "Email and new password are required" });
+
+    // Hash new password
+    const salt = await bcrypt.genSalt(10);
+    const hash = await bcrypt.hash(password, salt);
+
+    // Update user password
+    const user = await userModel.findOneAndUpdate({ email }, { password: hash }, { new: true });
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    console.log("✅ Password updated successfully for:", email);
+    res.status(200).json({ message: "Password updated successfully" });
+  } catch (error) {
+    console.error("❌ ERROR resetting password:", error);
+    res.status(500).json({ message: "Failed to reset password" });
+  }
+});
+
+// --- END FORGOT PASSWORD ROUTES ---
+
+app.post("/send-otp", async (req, res) => {
+  console.log("📨 Received request for /send-otp to:", req.body.email);
+  try {
+    const { email, cnic } = req.body;
+    if (!email) {
+      console.log("❌ Error: Email is missing in request body");
+      return res.status(400).json({ message: "Email is required" });
+    }
+
+    // Check if email or CNIC already exists BEFORE sending OTP
+    const checkEmail = await userModel.findOne({ email });
+    if (checkEmail) {
+      console.log(`❌ Registration failed: Email ${email} already in use`);
+      return res.status(400).json({ message: "Email already in use" });
+    }
+
+    if (cnic) {
+      const checkCnic = await userModel.findOne({ cnic });
+      if (checkCnic) {
+        console.log(`❌ Registration failed: CNIC ${cnic} already registered`);
+        return res.status(400).json({ message: "CNIC already registered" });
+      }
+    }
+
+    // Generate 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiry = Date.now() + 60000; // 1 minute expiry
+
+    console.log(`🔢 Generated OTP: ${otp} for ${email}`);
+    otpStore.set(email, { otp, expiry });
+
+    const mailOptions = {
+      from: `"Talha Builders Support" <abdullah.fazal1210@gmail.com>`,
+      to: email,
+      subject: `[Talha Builders] Your Verification Code: ${otp}`,
+      text: `Your One-Time Password (OTP) for registration is: ${otp}. This code will expire in 1 minute.`,
+      html: `
+        <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: auto; border: 1px solid #e0e0e0; border-radius: 12px; overflow: hidden; background-color: #ffffff;">
+          <div style="background-color: #703BF7; padding: 30px; text-align: center;">
+            <h1 style="color: #ffffff; margin: 0; font-size: 24px; letter-spacing: 1px;">TALHA BUILDERS</h1>
+          </div>
+          <div style="padding: 40px; color: #333333;">
+            <h2 style="color: #1A1A1A; margin-top: 0;">Email Verification</h2>
+            <p style="font-size: 16px; line-height: 1.6; color: #666666;">
+              Thank you for choosing Talha Builders. Please use the verification code below to complete your registration process.
+            </p>
+            <div style="text-align: center; margin: 40px 0;">
+              <div style="display: inline-block; background-color: #f4f4f4; padding: 20px 40px; border-radius: 12px; font-size: 36px; font-weight: bold; color: #703BF7; letter-spacing: 10px; border: 2px dashed #703BF7;">
+                ${otp}
+              </div>
+            </div>
+            <p style="font-size: 14px; color: #999999; text-align: center;">
+              This code is valid for <strong>1 minute</strong>.
+            </p>
+            <hr style="border: 0; border-top: 1px solid #eeeeee; margin: 30px 0;" />
+            <p style="font-size: 12px; color: #aaaaaa; line-height: 1.5;">
+              If you didn't request this email, you can safely ignore it. Someone might have typed your email address by mistake.
+            </p>
+          </div>
+          <div style="background-color: #fafafa; padding: 20px; text-align: center; border-top: 1px solid #eeeeee;">
+            <p style="margin: 0; font-size: 12px; color: #999999;">&copy; 2026 Talha Builders. All rights reserved.</p>
+          </div>
+        </div>
+      `,
+    };
+
+    console.log("📤 Attempting to send email via Nodemailer...");
+    const info = await transporter.sendMail(mailOptions);
+    console.log("✅ Email sent successfully! MessageId:", info.messageId);
+
+    res.status(200).json({ message: "OTP sent successfully" });
+  } catch (error) {
+    console.error("❌ NODEMAILER ERROR:", error);
+    res.status(500).json({
+      message: "Failed to send OTP",
+      error: error.message,
+      details: error.code || "No code"
+    });
+  }
+});
+
+app.post("/verify-otp", (req, res) => {
+  const { email, otp } = req.body;
+  const storedData = otpStore.get(email);
+
+  if (!storedData) {
+    return res.status(400).json({ message: "OTP not requested or expired" });
+  }
+
+  if (Date.now() > storedData.expiry) {
+    otpStore.delete(email);
+    return res.status(400).json({ message: "OTP expired" });
+  }
+
+  if (storedData.otp === otp) {
+    otpStore.delete(email);
+    res.status(200).json({ message: "OTP verified successfully" });
+  } else {
+    res.status(400).json({ message: "Invalid OTP" });
+  }
+});
+
 // --- Auth Routes Optimized ---
 
 app.post("/register", async (req, res) => {
+  console.log("📝 Final Registration Request Body:", req.body);
   try {
-    const { full_name, email, password } = req.body;
-    const check = await userModel.findOne({ email });
+    const { full_name, email, password, cnic, father_name, address, mobile } = req.body;
 
-    if (check) {
-      return res.status(400).json({ message: "email already use" });
+    // Final check before creation - only check if values are truthy
+    const query = [];
+    if (email) query.push({ email });
+    if (cnic) query.push({ cnic });
+
+    if (query.length > 0) {
+      const existingUser = await userModel.findOne({ $or: query });
+      if (existingUser) {
+        console.log("❌ Registration Blocked: User already exists.");
+        const reason = existingUser.email === email ? "Email" : "CNIC";
+        console.log(`🔍 Conflict found on: ${reason}`);
+        return res.status(400).json({ message: `${reason} already registered. Please check your data.` });
+      }
     }
 
     const salt = await bcrypt.genSalt(10);
@@ -69,9 +330,13 @@ app.post("/register", async (req, res) => {
       full_name,
       email,
       password: hash,
+      cnic,
+      father_name,
+      address,
+      mobile,
     });
 
-    res.status(200).json({ user, msg: "data saved successfully" });
+    res.status(200).json({ user, msg: "Data saved successfully" });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Server error during registration" });
@@ -80,8 +345,8 @@ app.post("/register", async (req, res) => {
 
 app.post("/login", async (req, res) => {
   try {
-    const { email, password } = req.body;
-    const available = await userModel.findOne({ email });
+    const { cnic, password } = req.body;
+    const available = await userModel.findOne({ cnic });
 
     if (!available) {
       return res.status(404).json({ message: "user not found" });
@@ -107,12 +372,52 @@ app.post("/login", async (req, res) => {
 
     res.status(200).json({
       message: "user login success",
-      email,
+      email: available.email,
       full_name: available.full_name,
+      profileImage: available.profileImage, // Include profile image in login response
     });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "server error" });
+  }
+});
+
+// Change Password Route (Authenticated)
+app.post("/change-password", verifyToken, async (req, res) => {
+  console.log("🔐 Authenticated request for /change-password from:", req.user.email);
+  try {
+    const { oldPassword, newPassword } = req.body;
+    const { id } = req.user;
+
+    if (!oldPassword || !newPassword) {
+      return res.status(400).json({ message: "Old and new passwords are required" });
+    }
+
+    // Find user
+    const user = await userModel.findById(id);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Verify old password
+    const isMatch = await bcrypt.compare(oldPassword, user.password);
+    if (!isMatch) {
+      return res.status(401).json({ message: "Incorrect old password" });
+    }
+
+    // Hash new password
+    const salt = await bcrypt.genSalt(10);
+    const hash = await bcrypt.hash(newPassword, salt);
+
+    // Update password
+    user.password = hash;
+    await user.save();
+
+    console.log("✅ Password updated successfully for:", user.email);
+    res.status(200).json({ message: "Password updated successfully" });
+  } catch (error) {
+    console.error("❌ ERROR changing password:", error);
+    res.status(500).json({ message: "Failed to change password" });
   }
 });
 
@@ -186,17 +491,6 @@ app.get("/property/status/:id", async (req, res) => {
   }
 });
 
-// Middleware to verify JWT
-const verifyToken = (req, res, next) => {
-  const token = req.cookies.authToken;
-  if (!token) return res.status(401).json({ msg: "Not authenticated" });
-
-  jwt.verify(token, Secret_key, (err, decoded) => {
-    if (err) return res.status(403).json({ msg: "Token is invalid" });
-    req.user = decoded;
-    next();
-  });
-};
 
 // --- Restored Missing Routes ---
 
@@ -337,6 +631,78 @@ app.get("/user/history", verifyToken, async (req, res) => {
   } catch (error) {
     console.error("Error fetching my history:", error);
     res.status(500).json({ msg: "Failed to fetch history" });
+  }
+});
+
+// Get User Profile Details
+app.get("/user/profile", verifyToken, async (req, res) => {
+  try {
+    const { id } = req.user;
+    const user = await userModel.findById(id).select("-password");
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    res.status(200).json(user);
+  } catch (error) {
+    console.error("Error fetching profile:", error);
+    res.status(500).json({ message: "Server error fetching profile" });
+  }
+});
+
+// Update User Profile Details
+app.put("/user/profile", verifyToken, async (req, res) => {
+  try {
+    const { id } = req.user;
+    const { full_name, email, cnic, father_name, address, mobile } = req.body;
+
+    const updatedUser = await userModel.findByIdAndUpdate(
+      id,
+      { full_name, email, cnic, father_name, address, mobile },
+      { new: true }
+    ).select("-password");
+
+    if (!updatedUser) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    res.status(200).json({ message: "Profile updated successfully", user: updatedUser });
+  } catch (error) {
+    console.error("Error updating profile:", error);
+    res.status(500).json({ message: "Server error updating profile" });
+  }
+});
+
+// Update Profile Photo
+app.post("/user/update-photo", verifyToken, upload.single("profileImage"), async (req, res) => {
+  try {
+    const { id } = req.user;
+    if (!req.file) {
+      return res.status(400).json({ message: "No image provided" });
+    }
+
+    // Convert buffer to base64
+    const base64Image = `data:${req.file.mimetype};base64,${req.file.buffer.toString("base64")}`;
+
+    const updatedUser = await userModel.findByIdAndUpdate(
+      id,
+      { profileImage: base64Image },
+      { new: true }
+    ).select("-password");
+
+    if (!updatedUser) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    res.status(200).json({
+      message: "Photo updated successfully",
+      profileImage: base64Image,
+      user: updatedUser
+    });
+  } catch (error) {
+    console.error("Error updating photo:", error);
+    res.status(500).json({ message: "Server error updating photo" });
   }
 });
 
@@ -517,7 +883,7 @@ app.post("/property/delete", async (req, res) => {
 });
 
 // Railway Port Fix
-const PORT = process.env.PORT || 2000;
+const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });

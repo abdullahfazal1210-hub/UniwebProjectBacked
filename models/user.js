@@ -9,6 +9,14 @@ const userSchema = mongoose.Schema({
     password: String,
     googleId: String,
     profileImage: String,
+    father_name: String,
+    address: String,
+    mobile: String,
+    cnic: {
+        type: String,
+        required: true,
+        unique: true
+    },
     Date: {
         type: Date,
         default: Date.now
